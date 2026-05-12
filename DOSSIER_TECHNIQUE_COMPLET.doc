@@ -1,0 +1,2460 @@
+VETCARE — DOSSIER TECHNIQUE COMPLET
+Clinique Veterinaire Moderne
+Realise par : Ingrid Gusmao — Etudiante
+Periode : Mars – Mai 2026
+
+Ce document presente l'integralite du projet VetCare, depuis l'installation des outils
+jusqu'a chaque ligne de code, avec une explication detaillee du role de chaque fichier,
+de chaque instruction et de chaque choix technique. Il est destine a permettre de
+presenter et defendre le projet devant un jury.
+
+================================================================================
+TABLE DES MATIERES
+================================================================================
+
+1.  Vue d'ensemble du projet
+2.  Stack technologique — Pourquoi ces choix ?
+3.  Structure des dossiers
+4.  Etape 0 — Prerequis et installations
+5.  Etape 1 — Infrastructure Docker
+6.  Etape 2 — Base de donnees PostgreSQL
+7.  Etape 3 — Backend Node.js / Express
+8.  Etape 4 — Frontend React
+9.  Etape 5 — Tests
+10. Securite — Recapitulatif
+11. Lancer le projet
+
+
+================================================================================
+1. VUE D'ENSEMBLE
+================================================================================
+
+VetCare est une application web de gestion pour une clinique veterinaire. Elle
+permet au personnel (administrateurs, veterinaires, assistants) de :
+
+  - Se connecter de maniere securisee avec un role attribue
+  - Gerer les proprietaires d'animaux
+  - Gerer les dossiers patients (animaux)
+  - Creer et suivre les consultations
+  - Gerer les traitements medicaux
+  - Consulter un tableau de bord avec les indicateurs cles
+
+L'application est composee de trois couches :
+
+    NAVIGATEUR
+        |
+        v
+    FRONTEND (React + Vite, servi par Nginx sur le port 80)
+        |   Appels HTTP /api/*
+        v
+    BACKEND (Node.js + Express sur le port 4000)
+        |   Requetes SQL parametrees
+        v
+    BASE DE DONNEES (PostgreSQL sur le port 5432)
+
+
+================================================================================
+2. STACK TECHNOLOGIQUE — POURQUOI CES CHOIX ?
+================================================================================
+
+COUCHE         | TECHNOLOGIE              | RAISON DU CHOIX
+---------------|--------------------------|------------------------------------------
+Frontend       | React 19 + TypeScript    | Composants reutilisables, typage fort,
+               |                          | hot-reload en developpement
+Build          | Vite 5                   | 100x plus rapide que Webpack, rechargement
+               |                          | instantane (HMR), format ESM natif
+Backend        | Node.js 20 + Express 5   | Non-bloquant (gere les requetes
+               |                          | simultanees), meme langage que le frontend
+Base de donnees| PostgreSQL 15            | ACID (transactions sures), ENUMs natifs,
+               |                          | triggers, index avances, open-source
+Pilote BDD     | pg (node-postgres)       | Bibliotheque officielle, pool de connexions,
+               |                          | requetes parametrees contre l'injection SQL
+Authentification| JWT + Argon2id          | JWT = sessions sans etat (scalable),
+               |                          | Argon2id = meilleur algo hash OWASP 2024
+Validation     | Zod                      | Un schema genere le type ET la validation,
+               |                          | source unique de verite
+Securite HTTP  | Helmet.js                | Ajoute 12 en-tetes de securite HTTP en
+               |                          | une seule ligne
+Conteneurs     | Docker + Docker Compose  | Un seul "docker compose up" lance les 3
+               |                          | services sur n'importe quelle machine
+Formulaires    | React Hook Form          | Gere l'etat des formulaires sans re-render
+Requetes HTTP  | Axios                    | Intercepteurs, timeout, gestion centralisee
+
+
+================================================================================
+3. STRUCTURE DES DOSSIERS
+================================================================================
+
+vetcare/                          <- racine du projet
+|-- .env                          <- variables secretes (non versionne)
+|-- docker-compose.yml            <- orchestre les 3 conteneurs
+|-- package.json                  <- workspace racine (minimal)
+|
+|-- database/
+|   |-- schema.sql                <- cree toutes les tables et types
+|   |-- seed.sql                  <- donnees de demonstration
+|   `-- seed_passwords.sql        <- hachages Argon2id reels pour le seed
+|
+|-- backend/
+|   |-- Dockerfile                <- build multi-etapes pour l'API
+|   |-- package.json              <- dependances Node.js
+|   |-- tsconfig.json             <- configuration TypeScript strict
+|   |-- jest.config.ts            <- configuration des tests
+|   `-- src/
+|       |-- server.ts             <- point d'entree, ecoute le port
+|       |-- app.ts                <- fabrique Express + middleware stack
+|       |-- types/index.ts        <- contrat de types partage
+|       |-- config/
+|       |   |-- env.ts            <- lecture et validation des variables d'env
+|       |   `-- db.ts             <- pool PostgreSQL + helper query()
+|       |-- controllers/          <- logique HTTP (entree/sortie)
+|       |-- models/               <- acces base de donnees (SQL)
+|       |-- routes/               <- declaration des endpoints
+|       |-- middlewares/          <- authentification, validation, erreurs
+|       |-- validators/           <- schemas Zod par entite
+|       `-- utils/                <- hachage, JWT
+|
+`-- frontend/
+    |-- Dockerfile                <- build Vite + Nginx
+    |-- nginx.conf                <- proxy /api -> backend, SPA fallback
+    |-- index.html                <- point d'entree HTML unique
+    |-- vite.config.ts            <- configuration Vite + Vitest
+    |-- styles/
+    |   |-- tokens.css            <- variables CSS (couleurs, typo, espaces)
+    |   `-- global.css            <- reset + accessibilite globale
+    `-- src/
+        |-- main.tsx              <- monte React dans le DOM
+        |-- App.tsx               <- routeur principal
+        |-- lib/api.ts            <- instance Axios centralisee
+        |-- api/                  <- fonctions d'appel API par entite
+        |-- context/              <- AuthContext (etat global d'auth)
+        |-- routes/               <- PrivateRoute (garde d'authentification)
+        |-- layouts/              <- PublicLayout, DashboardLayout
+        |-- pages/                <- une page par route
+        `-- components/
+            |-- atoms/            <- Button, Input, Badge, Avatar, Spinner
+            |-- molecules/        <- FormField, SearchBar, KpiCard
+            `-- organisms/        <- Header, Sidebar, PatientsTable
+
+
+================================================================================
+4. ETAPE 0 — PREREQUIS ET INSTALLATIONS
+================================================================================
+
+4.1 OUTILS A INSTALLER SUR LA MACHINE
+--------------------------------------
+
+Node.js 20 (LTS)
+
+    # macOS avec Homebrew
+    brew install node@20
+
+    # Linux (Ubuntu/Debian)
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+
+    # Verification
+    node --version   # doit afficher v20.x.x
+    npm --version    # doit afficher 10.x.x
+
+POURQUOI Node.js 20 ?
+C'est la version LTS (Long Term Support) active en 2026. Elle inclut la gestion
+native des signaux (SIGTERM/SIGINT) dont le backend a besoin pour s'arreter
+proprement dans Docker.
+
+---
+
+Docker Desktop
+
+    # macOS
+    brew install --cask docker
+    # Lancer l'application Docker Desktop depuis le Finder
+
+    # Verification
+    docker --version         # Docker version 25.x.x
+    docker compose version   # Docker Compose version v2.x.x
+
+POURQUOI Docker ?
+Il permet d'encapsuler les 3 services (PostgreSQL, backend, frontend) dans des
+conteneurs isoles. N'importe quelle machine lance le projet identiquement avec
+"docker compose up". Plus de "ca marche chez moi mais pas chez toi".
+
+---
+
+PostgreSQL 15 (pour developpement local sans Docker)
+
+    # macOS
+    brew install postgresql@15
+    brew services start postgresql@15
+
+    # Creer la base de donnees locale
+    createdb vetcare
+    createuser ingrid --superuser
+
+
+4.2 INITIALISATION DU PROJET
+------------------------------
+
+    mkdir vetcare && cd vetcare
+    npm init -y
+    mkdir backend frontend database
+
+    # ---- Backend ----
+    cd backend
+    npm init -y
+
+    # Dependances de production
+    npm install express@5 pg argon2 jsonwebtoken zod \
+                helmet cors cookie-parser morgan dotenv
+
+    # Dependances de developpement
+    npm install -D typescript @types/node @types/express \
+                   @types/pg @types/jsonwebtoken \
+                   @types/cors @types/cookie-parser @types/morgan \
+                   ts-node jest @types/jest supertest @types/supertest \
+                   ts-jest nodemon
+
+    # ---- Frontend ----
+    cd ../frontend
+    npm create vite@latest . -- --template react-ts
+    npm install react-router-dom axios react-hook-form
+    npm install -D vitest @testing-library/react \
+                   @testing-library/jest-dom jsdom
+
+EXPLICATION DES DEPENDANCES BACKEND :
+
+  express@5        : framework HTTP, gere les routes, middleware, req/res
+  pg               : pilote officiel PostgreSQL pour Node.js
+  argon2           : hachage de mots de passe (OWASP 2024)
+  jsonwebtoken     : signe et verifie les tokens JWT
+  zod              : validation de schema TypeScript avec inference de types
+  helmet           : ajoute des en-tetes HTTP de securite en une ligne
+  cors             : configure les origines autorisees a appeler l'API
+  cookie-parser    : parse les cookies entrants dans req.cookies
+  morgan           : logger HTTP — affiche chaque requete dans le terminal
+  dotenv           : lit le fichier .env et injecte dans process.env
+
+
+================================================================================
+5. ETAPE 1 — INFRASTRUCTURE DOCKER
+================================================================================
+
+5.1 FICHIER : docker-compose.yml
+----------------------------------
+
+CONTENU COMPLET :
+
+    version: '3.9'
+
+    services:
+      db:
+        image: postgres:15-alpine
+        container_name: vetcare_db
+        environment:
+          POSTGRES_USER: ingrid
+          POSTGRES_PASSWORD: 123
+          POSTGRES_DB: vetcare
+        ports:
+          - '5432:5432'
+        volumes:
+          - vetcare_db_data:/var/lib/postgresql/data
+          - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+          - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+        healthcheck:
+          test: ['CMD-SHELL', 'pg_isready -U postgres -d vetcare']
+          interval: 10s
+          timeout: 5s
+          retries: 5
+        networks:
+          - vetcare_net
+        restart: unless-stopped
+
+      backend:
+        build:
+          context: ./backend
+          dockerfile: Dockerfile
+        container_name: vetcare_backend
+        environment:
+          NODE_ENV: production
+          PORT: 4000
+          DATABASE_URL: postgres://postgres:postgres@db:5432/vetcare
+          JWT_SECRET: ${JWT_SECRET}
+          JWT_EXPIRES_IN: 8h
+          CORS_ORIGIN: http://localhost
+          COOKIE_SECURE: 'false'
+        ports:
+          - '4000:4000'
+        depends_on:
+          db:
+            condition: service_healthy
+        networks:
+          - vetcare_net
+        restart: unless-stopped
+
+      frontend:
+        build:
+          context: ./frontend
+          dockerfile: Dockerfile
+        container_name: vetcare_frontend
+        ports:
+          - '80:80'
+        depends_on:
+          - backend
+        networks:
+          - vetcare_net
+        restart: unless-stopped
+
+    volumes:
+      vetcare_db_data:
+
+    networks:
+      vetcare_net:
+        driver: bridge
+
+EXPLICATION LIGNE PAR LIGNE :
+
+  version: '3.9'
+    Syntaxe moderne Docker Compose avec support des healthchecks et
+    conditions dans depends_on.
+
+  image: postgres:15-alpine
+    Image officielle PostgreSQL 15 en version alpine (Linux minimaliste =
+    image 5x plus petite qu'Ubuntu). Le tag '15' epingle la version exacte
+    pour eviter une mise a jour automatique qui casserait la compatibilite.
+
+  POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
+    Variables lues par l'image au premier demarrage pour initialiser la base.
+
+  ports: '5432:5432'
+    Format hote:conteneur. Expose PostgreSQL sur la machine hote pour les
+    outils comme DBeaver. En production, on supprimerait cette ligne pour
+    garder la DB inaccessible de l'exterieur.
+
+  volumes (premier) : vetcare_db_data:/var/lib/postgresql/data
+    Volume nomme Docker. Les donnees survivent a "docker compose down".
+    Seul "docker compose down -v" les efface (intentionnel).
+
+  volumes (deuxieme/troisieme) : ./database/schema.sql -> initdb.d/
+    PostgreSQL execute automatiquement tous les .sql dans initdb.d/ lors
+    du premier demarrage, dans l'ordre alphabetique. Prefixes 01- et 02-
+    garantissent schema avant seed. ':ro' = read-only sur l'hote.
+
+  healthcheck
+    Docker verifie toutes les 10s si PostgreSQL accepte des connexions.
+    pg_isready retourne 0 si pret, 1 sinon. Le backend ne demarre qu'apres
+    que la DB passe en etat 'healthy' (voir depends_on ci-dessous).
+
+  DATABASE_URL: postgres://...@db:5432/vetcare
+    'db' est le nom du service Docker. Docker Compose cree un DNS interne
+    — le backend resout 'db' vers l'IP du conteneur PostgreSQL.
+
+  ${JWT_SECRET}
+    Syntaxe Compose pour lire une variable du fichier .env a la racine.
+    Le secret ne doit jamais etre harde dans le code source.
+
+  condition: service_healthy
+    Attend que le healthcheck de la DB passe avant de demarrer le backend.
+    Sans cela, Express demarrerait avant que PostgreSQL soit pret.
+
+  ports frontend: '80:80'
+    Le frontend Nginx ecoute sur le port HTTP standard. L'utilisateur
+    accede a http://localhost (sans numero de port).
+
+
+5.2 FICHIER : backend/Dockerfile
+----------------------------------
+
+CONTENU COMPLET :
+
+    FROM node:20-alpine AS builder
+    WORKDIR /app
+    COPY package*.json ./
+    RUN npm ci
+    COPY . .
+    RUN npm run build
+
+    FROM node:20-alpine
+    WORKDIR /app
+    RUN addgroup -S vetcare && adduser -S vetcare -G vetcare
+    COPY package*.json ./
+    RUN npm ci --omit=dev && npm cache clean --force
+    COPY --from=builder /app/dist ./dist
+    USER vetcare
+    EXPOSE 4000
+    HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+      CMD node -e "require('http').get('http://localhost:4000/api/health', \
+      (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+    CMD ["node", "dist/server.js"]
+
+EXPLICATION :
+
+  Build multi-etapes (multi-stage build)
+    La premiere etape (builder) installe les dependances de developpement
+    et compile TypeScript en JavaScript. La deuxieme etape cree une image
+    propre sans TypeScript, Jest, etc. L'image finale est ~200 Mo plus
+    legere.
+
+  COPY package*.json ./ avant COPY . .
+    Optimisation du cache Docker. Si seul le code source change (pas les
+    dependances), Docker reutilise la couche 'npm ci' sans tout
+    reinstaller. Reduit le temps de build de 3 minutes a 10 secondes.
+
+  npm ci vs npm install
+    'npm ci' lit exactement package-lock.json et refuse de le modifier.
+    Builds 100% reproductibles sur toutes les machines et en CI/CD.
+
+  addgroup -S vetcare && adduser -S vetcare -G vetcare
+    Cree un utilisateur sans privileges. Bonne pratique de securite : un
+    conteneur ne doit jamais tourner en root. Si un attaquant exploite une
+    faille, il obtient un utilisateur limite.
+
+  --omit=dev
+    N'installe que les dependances de production (pas TypeScript, Jest...).
+
+  COPY --from=builder /app/dist ./dist
+    Copie uniquement le JavaScript compile depuis le premier stage. Le
+    code TypeScript source ne termine jamais dans l'image finale.
+
+
+5.3 FICHIER : frontend/nginx.conf
+-----------------------------------
+
+CONTENU COMPLET :
+
+    server {
+        listen 80;
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        location /api/ {
+            proxy_pass http://backend:4000/api/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_pass_request_headers on;
+        }
+
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        location ~* \.(js|css|png|jpg|jpeg|svg|woff2?)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+EXPLICATION :
+
+  location /api/
+    Tout ce qui commence par /api/ est transmis au service 'backend' sur
+    le port 4000. Les cookies JWT sont transmis au backend. C'est le
+    pattern "reverse proxy".
+
+  try_files $uri $uri/ /index.html
+    Si l'URL ne correspond pas a un fichier physique (ex: /dashboard),
+    Nginx sert index.html. React Router prend le relais cote client.
+    Sans cette ligne, actualiser /dashboard retournerait 404.
+
+  expires 1y + immutable
+    Les bundles Vite ont des noms avec hash de contenu (main.abc123.js).
+    Si le contenu change, le nom change. On peut mettre en cache ces
+    fichiers pendant 1 an sans risque de servir du contenu perime.
+
+
+================================================================================
+6. ETAPE 2 — BASE DE DONNEES POSTGRESQL
+================================================================================
+
+6.1 FICHIER : database/schema.sql
+-----------------------------------
+
+CONTENU COMPLET :
+
+    -- Suppression en ordre inverse (enfants avant parents)
+    DROP TABLE IF EXISTS patients_traitements CASCADE;
+    DROP TABLE IF EXISTS dossier_traitements  CASCADE;
+    DROP TABLE IF EXISTS traitements          CASCADE;
+    DROP TABLE IF EXISTS consultations        CASCADE;
+    DROP TABLE IF EXISTS dossier              CASCADE;
+    DROP TABLE IF EXISTS patients             CASCADE;
+    DROP TABLE IF EXISTS proprietaires        CASCADE;
+    DROP TABLE IF EXISTS users                CASCADE;
+
+    DROP TYPE IF EXISTS user_role             CASCADE;
+    DROP TYPE IF EXISTS animal_species        CASCADE;
+    DROP TYPE IF EXISTS consultation_status   CASCADE;
+    DROP TYPE IF EXISTS treatment_status      CASCADE;
+
+    CREATE TYPE user_role AS ENUM (
+      'administrateur', 'veterinaire', 'assistant'
+    );
+
+    CREATE TYPE animal_species AS ENUM (
+      'chien', 'chat', 'lapin', 'oiseau', 'reptile', 'rongeur', 'autre'
+    );
+
+    CREATE TYPE consultation_status AS ENUM (
+      'prevue', 'terminee', 'annulee'
+    );
+
+    CREATE TYPE treatment_status AS ENUM (
+      'en_cours', 'termine', 'suspendu'
+    );
+
+    CREATE OR REPLACE FUNCTION trigger_set_updated_at()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      NEW.updated_at = NOW();
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    CREATE TABLE users (
+      reference_user   SERIAL          PRIMARY KEY,
+      email            VARCHAR(255)    UNIQUE NOT NULL,
+      password_hash    TEXT            NOT NULL,
+      role             user_role       NOT NULL,
+      is_active        BOOLEAN         NOT NULL DEFAULT TRUE,
+      created_at       TIMESTAMP       NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMP       NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TRIGGER users_set_updated_at
+      BEFORE UPDATE ON users
+      FOR EACH ROW
+      EXECUTE FUNCTION trigger_set_updated_at();
+
+    CREATE TABLE proprietaires (
+      reference_prop   SERIAL          PRIMARY KEY,
+      nom              VARCHAR(100)    NOT NULL,
+      email            VARCHAR(255)    UNIQUE NOT NULL,
+      telephone        VARCHAR(20),
+      created_at       TIMESTAMP       NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMP       NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TRIGGER proprietaires_set_updated_at
+      BEFORE UPDATE ON proprietaires
+      FOR EACH ROW
+      EXECUTE FUNCTION trigger_set_updated_at();
+
+    CREATE TABLE patients (
+      reference_patient SERIAL         PRIMARY KEY,
+      nom               VARCHAR(100)   NOT NULL,
+      espece            animal_species NOT NULL,
+      veterinaire       VARCHAR(100),
+      actif             BOOLEAN        NOT NULL DEFAULT TRUE,
+      proprietaire_id   INT            NOT NULL
+                        REFERENCES proprietaires(reference_prop)
+                        ON DELETE CASCADE,
+      created_at        TIMESTAMP      NOT NULL DEFAULT NOW(),
+      updated_at        TIMESTAMP      NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX idx_patients_proprietaire ON patients(proprietaire_id);
+    CREATE INDEX idx_patients_actif        ON patients(actif);
+
+    CREATE TRIGGER patients_set_updated_at
+      BEFORE UPDATE ON patients
+      FOR EACH ROW
+      EXECUTE FUNCTION trigger_set_updated_at();
+
+    CREATE TABLE dossier (
+      reference_dossier   SERIAL       PRIMARY KEY,
+      patient_id          INT          UNIQUE NOT NULL
+                          REFERENCES patients(reference_patient)
+                          ON DELETE CASCADE,
+      allergie            TEXT,
+      intolerance         TEXT,
+      condition_physique  TEXT,
+      created_at          TIMESTAMP    NOT NULL DEFAULT NOW(),
+      updated_at          TIMESTAMP    NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TRIGGER dossier_set_updated_at
+      BEFORE UPDATE ON dossier
+      FOR EACH ROW
+      EXECUTE FUNCTION trigger_set_updated_at();
+
+    CREATE TABLE consultations (
+      reference_consultation SERIAL              PRIMARY KEY,
+      patient_id             INT                 NOT NULL
+                             REFERENCES patients(reference_patient)
+                             ON DELETE CASCADE,
+      veterinaire_id         INT                 NOT NULL
+                             REFERENCES users(reference_user)
+                             ON DELETE RESTRICT,
+      date                   TIMESTAMP           NOT NULL,
+      status                 consultation_status NOT NULL DEFAULT 'prevue',
+      motif                  TEXT,
+      created_at             TIMESTAMP           NOT NULL DEFAULT NOW(),
+      updated_at             TIMESTAMP           NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX idx_consultations_patient ON consultations(patient_id);
+    CREATE INDEX idx_consultations_vet     ON consultations(veterinaire_id);
+    CREATE INDEX idx_consultations_date    ON consultations(date);
+    CREATE INDEX idx_consultations_status  ON consultations(status);
+
+    CREATE TRIGGER consultations_set_updated_at
+      BEFORE UPDATE ON consultations
+      FOR EACH ROW
+      EXECUTE FUNCTION trigger_set_updated_at();
+
+    CREATE TABLE traitements (
+      reference_traitement SERIAL           PRIMARY KEY,
+      medicament           VARCHAR(200)     NOT NULL,
+      status               treatment_status NOT NULL DEFAULT 'en_cours',
+      created_at           TIMESTAMP        NOT NULL DEFAULT NOW(),
+      updated_at           TIMESTAMP        NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TRIGGER traitements_set_updated_at
+      BEFORE UPDATE ON traitements
+      FOR EACH ROW
+      EXECUTE FUNCTION trigger_set_updated_at();
+
+    CREATE TABLE dossier_traitements (
+      dossier_id    INT NOT NULL
+                    REFERENCES dossier(reference_dossier) ON DELETE CASCADE,
+      traitement_id INT NOT NULL
+                    REFERENCES traitements(reference_traitement) ON DELETE CASCADE,
+      PRIMARY KEY (dossier_id, traitement_id)
+    );
+
+    CREATE TABLE patients_traitements (
+      patient_id    INT NOT NULL
+                    REFERENCES patients(reference_patient) ON DELETE CASCADE,
+      traitement_id INT NOT NULL
+                    REFERENCES traitements(reference_traitement) ON DELETE CASCADE,
+      date_debut    DATE NOT NULL DEFAULT CURRENT_DATE,
+      date_fin      DATE,
+      PRIMARY KEY (patient_id, traitement_id)
+    );
+
+    CREATE INDEX idx_pt_patient    ON patients_traitements(patient_id);
+    CREATE INDEX idx_pt_traitement ON patients_traitements(traitement_id);
+
+EXPLICATION DETAILLEE :
+
+  DROP ... IF EXISTS ... CASCADE
+    Rend le fichier idempotent — on peut le relancer sans erreur meme si
+    les tables existent deja. CASCADE supprime aussi les objets qui
+    dependent de ce qu'on supprime (index, triggers, etc.).
+
+  L'ordre de suppression est inverse
+    On supprime les tables enfants avant les parents car les cles
+    etrangeres l'imposent. patients_traitements reference patients et
+    traitements, donc elle est supprimee en premier.
+
+  ENUM types
+    POURQUOI des ENUMs et pas des VARCHAR ?
+    1. Integrite : PostgreSQL rejette 'administratuer' (faute de frappe).
+       Impossible d'inserer une valeur non listee.
+    2. Stockage : 1 octet vs 15+ octets pour un VARCHAR.
+    3. Coherence avec TypeScript : le type Zod et TypeScript utilisent
+       exactement les memes valeurs.
+
+  trigger_set_updated_at()
+    Fonction appelee automatiquement par la base de donnees avant chaque
+    UPDATE. NEW represente la nouvelle ligne sur le point d'etre ecrite.
+    On modifie updated_at avant l'ecriture.
+    POURQUOI un trigger et pas la logique applicative ?
+    Le code applicatif peut avoir des bugs ou des omissions. Le trigger
+    est applique au niveau de la DB pour chaque UPDATE, peu importe qui
+    l'effectue (application, admin SQL, migration).
+
+  SERIAL
+    Alias PostgreSQL pour INTEGER GENERATED ALWAYS AS IDENTITY. Genere
+    un entier auto-incremente : 1, 2, 3... Pas d'UUID car plus simple a
+    lire dans les logs et les URLs.
+
+  UNIQUE NOT NULL sur email
+    Garantit qu'aucun email n'est enregistre deux fois, meme sous une
+    race condition (deux INSERT simultanees) — PostgreSQL pose un verrou.
+
+  TEXT pour password_hash
+    Les hachages Argon2id font ~96 caracteres mais TEXT ne limite pas
+    la taille — zero risque de troncature future.
+
+  actif BOOLEAN DEFAULT TRUE (patients)
+    Soft delete — quand un animal decede ou part, on met actif = FALSE.
+    L'historique des consultations et traitements est conserve. Le cahier
+    des charges interdit la suppression physique (US-08).
+
+  REFERENCES proprietaires(reference_prop) ON DELETE CASCADE
+    Cle etrangere vers proprietaires. ON DELETE CASCADE : si on supprime
+    un proprietaire, tous ses animaux sont automatiquement supprimes.
+    Logique metier : pas d'animal sans proprietaire.
+
+  CREATE INDEX idx_patients_proprietaire ON patients(proprietaire_id)
+    PostgreSQL parcourt normalement toute la table pour trouver des lignes
+    correspondant a un WHERE (O(n)). Un index est une structure B-tree
+    qui permet des recherches en O(log n). Accelere "patients du
+    proprietaire X" et "tous les patients actifs".
+
+  patient_id INT UNIQUE NOT NULL (dans dossier)
+    C'est UNIQUE qui enforce la relation 1:1 avec patients. Sans UNIQUE,
+    on pourrait creer deux dossiers pour le meme animal.
+
+  ON DELETE RESTRICT (consultations.veterinaire_id)
+    Ne peut pas supprimer un veterinaire qui a des consultations liees.
+    Force un admin a reassigner d'abord — protege l'historique.
+
+  PRIMARY KEY (dossier_id, traitement_id) dans les tables de jonction
+    Cle primaire composite — la paire (dossier, traitement) est unique.
+    Un meme traitement ne peut pas etre associe deux fois au meme dossier.
+
+
+================================================================================
+7. ETAPE 3 — BACKEND NODE.JS / EXPRESS
+================================================================================
+
+7.1 FICHIER : backend/tsconfig.json
+-------------------------------------
+
+CONTENU COMPLET :
+
+    {
+      "compilerOptions": {
+        "target": "ES2022",
+        "module": "CommonJS",
+        "strict": true,
+        "outDir": "dist",
+        "rootDir": "src",
+        "esModuleInterop": true,
+        "resolveJsonModule": true,
+        "skipLibCheck": true
+      },
+      "include": ["src/**/*"],
+      "exclude": ["node_modules", "dist"]
+    }
+
+EXPLICATION :
+
+  target: "ES2022"
+    Compile vers ES2022 — Node.js 20 supporte tout ES2022 nativement
+    (async/await, optional chaining, etc.). Pas besoin de compiler vers ES5.
+
+  module: "CommonJS"
+    Node.js utilise le systeme de modules CommonJS (require). TypeScript
+    compile les 'import' en 'require()'.
+
+  strict: true
+    Active toutes les verifications strictes TypeScript : strictNullChecks,
+    noImplicitAny, etc. Force a gerer les cas null et undefined.
+
+  outDir: "dist"
+    Le JavaScript compile va dans le dossier dist/.
+
+  esModuleInterop: true
+    Permet d'ecrire 'import express from "express"' au lieu de
+    'import * as express from "express"' pour les modules CommonJS.
+
+
+7.2 FICHIER : src/types/index.ts — Le contrat de types
+--------------------------------------------------------
+
+CONTENU COMPLET :
+
+    export type UserRole = 'administrateur' | 'veterinaire' | 'assistant';
+
+    export type AnimalSpecies =
+      | 'chien' | 'chat' | 'lapin' | 'oiseau' | 'reptile' | 'rongeur' | 'autre';
+
+    export type ConsultationStatus = 'prevue' | 'terminee' | 'annulee';
+
+    export type TreatmentStatus = 'en_cours' | 'termine' | 'suspendu';
+
+    export interface User {
+      reference_user: number;
+      email: string;
+      password_hash: string;
+      role: UserRole;
+      is_active: boolean;
+      created_at: Date;
+      updated_at: Date;
+    }
+
+    export type PublicUser = Omit<User, 'password_hash'>;
+
+    export interface Proprietaire {
+      reference_prop: number;
+      nom: string;
+      email: string;
+      telephone: string | null;
+      created_at: Date;
+      updated_at: Date;
+    }
+
+    export interface Patient {
+      reference_patient: number;
+      nom: string;
+      espece: AnimalSpecies;
+      veterinaire: string | null;
+      actif: boolean;
+      proprietaire_id: number;
+      created_at: Date;
+      updated_at: Date;
+    }
+
+    export interface Dossier {
+      reference_dossier: number;
+      patient_id: number;
+      allergie: string | null;
+      intolerance: string | null;
+      condition_physique: string | null;
+      created_at: Date;
+      updated_at: Date;
+    }
+
+    export interface Consultation {
+      reference_consultation: number;
+      patient_id: number;
+      veterinaire_id: number;
+      date: Date;
+      status: ConsultationStatus;
+      motif: string | null;
+      created_at: Date;
+      updated_at: Date;
+    }
+
+    export interface Traitement {
+      reference_traitement: number;
+      medicament: string;
+      status: TreatmentStatus;
+      created_at: Date;
+      updated_at: Date;
+    }
+
+    export interface TokenPayload {
+      sub: number;
+      email: string;
+      role: UserRole;
+    }
+
+    declare global {
+      namespace Express {
+        interface Request {
+          user?: TokenPayload;
+        }
+      }
+    }
+
+EXPLICATION :
+
+  UserRole = 'administrateur' | 'veterinaire' | 'assistant'
+    Union type — TypeScript refuse toute autre valeur a la compilation.
+    Coherent avec le ENUM PostgreSQL et les schemas Zod.
+
+  PublicUser = Omit<User, 'password_hash'>
+    Cree un type identique a User mais sans password_hash. C'est la
+    representation qu'on renvoie au client — le hash ne doit jamais
+    sortir de l'API. Si on ajoute un champ sensible a User, PublicUser
+    l'exclura automatiquement.
+
+  TokenPayload { sub, email, role }
+    sub = "subject" — champ standard JWT representant l'identifiant de
+    l'utilisateur. On garde le payload minimal : seulement ce dont les
+    middlewares ont besoin pour autoriser les requetes.
+
+  declare global namespace Express { interface Request { user? } }
+    Augmentation de type Express. Sans ca, req.user ne compilerait pas
+    en TypeScript. Cette declaration etend l'interface Request d'Express
+    pour ajouter le champ user.
+
+
+7.3 FICHIER : src/config/env.ts — Variables d'environnement
+-------------------------------------------------------------
+
+CONTENU COMPLET :
+
+    import dotenv from 'dotenv';
+    dotenv.config();
+
+    function required(name: string): string {
+      const value = process.env[name];
+      if (!value || value.trim() === '') {
+        throw new Error(`Missing required environment variable: ${name}`);
+      }
+      return value;
+    }
+
+    export const env = {
+      PORT: parseInt(process.env.PORT ?? '4000', 10),
+      NODE_ENV: process.env.NODE_ENV ?? 'development',
+      DATABASE_URL: required('DATABASE_URL'),
+      JWT_SECRET: required('JWT_SECRET'),
+      JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN ?? '8h',
+      CORS_ORIGIN: (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
+        .split(',')
+        .map((s) => s.trim()),
+      COOKIE_SECURE: process.env.COOKIE_SECURE === 'true',
+    };
+
+EXPLICATION :
+
+  dotenv.config()
+    Lit le fichier .env et injecte chaque ligne dans process.env. Doit
+    etre la premiere instruction executee — avant tout autre import qui
+    lirait process.env.
+
+  function required(name)
+    "Fail fast" — si JWT_SECRET ou DATABASE_URL manquent, l'application
+    refuse de demarrer avec un message d'erreur clair. Mieux que demarrer
+    avec une config cassee et planter au premier appel API.
+
+  parseInt(... ?? '4000', 10)
+    Les variables d'env sont toujours des chaines. parseInt convertit
+    en entier. ?? fournit la valeur par defaut si PORT n'est pas defini.
+
+  .split(',').map(s => s.trim())
+    CORS_ORIGIN peut contenir plusieurs origines separees par des virgules.
+    On les decoupe en tableau.
+
+  === 'true'
+    process.env.COOKIE_SECURE est toujours une string. La comparaison
+    stricte convertit "true"/"false" en boolean.
+
+  Source unique de verite
+    Partout dans le code, on importe 'env' depuis ce fichier. Personne
+    n'accede directement a process.env — evite les erreurs de noms.
+
+
+7.4 FICHIER : src/config/db.ts — Pool PostgreSQL
+--------------------------------------------------
+
+CONTENU COMPLET :
+
+    import { Pool } from 'pg';
+    import { env } from './env';
+
+    export const pool = new Pool({
+      connectionString: process.env.DATABASE_URL || env.DATABASE_URL,
+      user: 'ingrid',
+      password: '123',
+      host: 'localhost',
+      database: 'vetcare',
+      port: 5432,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+    });
+
+    pool.on('error', (err) => {
+      console.error('Unexpected PostgreSQL pool error:', err);
+    });
+
+    export async function query<T = unknown>(
+      text: string,
+      params?: unknown[]
+    ): Promise<T[]> {
+      const result = await pool.query(text, params);
+      return result.rows as T[];
+    }
+
+EXPLICATION :
+
+  Pool de connexions
+    Au lieu d'ouvrir et fermer une connexion pour chaque requete (couteux),
+    le pool maintient 10 connexions ouvertes. Chaque requete en emprunte
+    une, l'utilise et la rend.
+
+  connectionString en priorite
+    Dans Docker, DATABASE_URL pointe vers db:5432. En local, les parametres
+    individuels (user, host, database) sont utilises. La logique || choisit
+    automatiquement.
+
+  idleTimeoutMillis: 30_000
+    Une connexion inactive depuis 30s est fermee. Evite de maintenir des
+    connexions ouvertes inutilement vers PostgreSQL.
+
+  pool.on('error')
+    Sans ce listener, Node.js crasherait si PostgreSQL se deconnecte
+    inopinement (unhandled error). Avec ce listener, on log l'erreur et
+    le pool tente de se reconnecter.
+
+  query<T>(text, params)
+    Wrapper qui retourne directement les lignes (result.rows), accepte un
+    generique <T> pour typer le resultat, et utilise des parametres
+    positionnels ($1, $2) — jamais de concatenation de chaines SQL.
+
+  INJECTION SQL
+    pg echappe automatiquement les valeurs de params. Il est impossible
+    d'injecter du SQL via les parametres. Protection fondamentale contre
+    l'injection SQL.
+
+
+7.5 FICHIER : src/app.ts — La fabrique Express
+------------------------------------------------
+
+CONTENU COMPLET :
+
+    import express, { Express } from 'express';
+    import cors from 'cors';
+    import helmet from 'helmet';
+    import cookieParser from 'cookie-parser';
+    import morgan from 'morgan';
+    import { env } from './config/env';
+    import routes from './routes';
+    import { errorHandler } from './middlewares/errorHandler';
+
+    export function buildApp(): Express {
+      const app = express();
+
+      app.use(helmet());
+
+      app.use(cors({
+        origin: env.CORS_ORIGIN,
+        credentials: true,
+      }));
+
+      app.use(cookieParser());
+      app.use(express.json({ limit: '1mb' }));
+
+      if (env.NODE_ENV !== 'test') {
+        app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+      }
+
+      app.use('/api', routes);
+
+      app.use((req, res) => {
+        res.status(404).json({ message: `Route ${req.method} ${req.path} introuvable` });
+      });
+
+      app.use(errorHandler);
+
+      return app;
+    }
+
+EXPLICATION :
+
+  helmet()
+    En une ligne, ajoute ~12 en-tetes HTTP de securite :
+    - X-Frame-Options: SAMEORIGIN  (empech le clickjacking par iframe)
+    - X-Content-Type-Options: nosniff  (empeche le MIME sniffing)
+    - Strict-Transport-Security  (force HTTPS)
+    - Content-Security-Policy  (limite les sources de scripts)
+
+  cors({ origin, credentials: true })
+    Le navigateur bloque les requetes entre origines differentes par defaut.
+    Notre frontend (localhost:5173) et backend (localhost:4000) sont des
+    origines differentes. credentials:true autorise les cookies JWT sur
+    les requetes cross-origin.
+
+  cookieParser()
+    Sans ce middleware, req.cookies serait undefined. Il parse l'en-tete
+    "Cookie: token=eyJhbGc..." en objet JavaScript { token: 'eyJhbGc...' }.
+
+  express.json({ limit: '1mb' })
+    Parse les corps de requete JSON. La limite 1Mo protege contre les
+    attaques par "body bombing" (envoi d'un JSON de 10 Go pour la RAM).
+
+  morgan pas en mode test
+    Les logs HTTP dans les tests sont parasites et ralentissent l'execution.
+
+  L'ORDRE DES MIDDLEWARE EST CRUCIAL
+    Express les execute sequentiellement :
+    1. Helmet (securite headers)
+    2. CORS (autorisations)
+    3. cookie-parser (parse les cookies)
+    4. express.json (parse le body)
+    5. morgan (log)
+    6. Routes (/api)
+    7. 404 (si aucune route n'a repondu)
+    8. errorHandler (si une route a appele next(err))
+
+  buildApp() retourne une instance
+    On peut importer buildApp() dans les tests et creer une instance fresh
+    sans demarrer un vrai serveur. server.ts appelle buildApp() et y
+    attache .listen().
+
+
+7.6 FICHIER : src/server.ts — Point d'entree
+---------------------------------------------
+
+CONTENU COMPLET :
+
+    import { buildApp } from './app';
+    import { env } from './config/env';
+    import { pool } from './config/db';
+
+    const app = buildApp();
+    const server = app.listen(env.PORT, () => {
+      console.log(`VetCare API running on http://localhost:${env.PORT}`);
+    });
+
+    function shutdown(signal: string) {
+      console.log(`\n${signal} received, shutting down...`);
+      server.close(async () => {
+        await pool.end();
+        process.exit(0);
+      });
+    }
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT',  () => shutdown('SIGINT'));
+
+EXPLICATION :
+
+  Separation app.ts / server.ts
+    app.ts cree l'application Express sans demarrer le serveur. server.ts
+    demarre le serveur. Dans les tests, on importe buildApp() depuis app.ts
+    et on utilise supertest qui simule les requetes sans ouvrir de port.
+
+  Arret gracieux (graceful shutdown)
+    Quand Docker envoie SIGTERM (arret normal), on attend la fin des
+    requetes en cours (server.close()), puis on ferme le pool PostgreSQL
+    (pool.end()), puis on quitte proprement. Sans ca, des connexions
+    PostgreSQL resteraient ouvertes ("zombie connections").
+
+
+7.7 FICHIER : src/utils/password.ts — Hachage Argon2id
+--------------------------------------------------------
+
+CONTENU COMPLET :
+
+    import argon2 from 'argon2';
+
+    const ARGON2_OPTIONS = {
+      type: argon2.argon2id,
+      memoryCost: 65_536,   // 64 MB
+      timeCost: 3,          // 3 iterations
+      parallelism: 4,       // 4 threads
+    };
+
+    export function hashPassword(plain: string): Promise<string> {
+      return argon2.hash(plain, ARGON2_OPTIONS);
+    }
+
+    export function verifyPassword(hash: string, plain: string): Promise<boolean> {
+      return argon2.verify(hash, plain);
+    }
+
+EXPLICATION :
+
+  POURQUOI Argon2id et pas bcrypt ou SHA256 ?
+    SHA256/MD5 : Trop rapide — un GPU peut tester des milliards de mots
+    de passe par seconde.
+    bcrypt : Mieux, mais vulnerable aux attaques GPU (memoire fixe a 4Ko).
+    Argon2id : Gagnant du Password Hashing Competition 2015. Necessite
+    64 Mo de RAM par tentative — meme avec 1000 GPU, l'attaquant ne peut
+    faire que ~1000 tentatives/seconde par GPU. Recommande par l'OWASP.
+
+  memoryCost: 65_536
+    Chaque tentative de verification requiert 64 Mo de RAM. En pratique :
+    le serveur verifie un mot de passe en < 100ms (rapide pour l'utilisateur),
+    mais un attaquant avec 1000 GPU ne peut faire que quelques milliers de
+    tentatives par seconde.
+
+  argon2.hash() genere automatiquement un sel aleatoire
+    Le hash retourne est de la forme :
+    $argon2id$v=19$m=65536,t=3,p=4$<sel_base64>$<hash_base64>
+    Le sel est integre dans la chaine — pas besoin de le stocker separement.
+
+
+7.8 FICHIER : src/utils/token.ts — JWT
+----------------------------------------
+
+CONTENU COMPLET :
+
+    import jwt from 'jsonwebtoken';
+    import { env } from '../config/env';
+    import { TokenPayload } from '../types';
+
+    export function signToken(payload: TokenPayload): string {
+      return jwt.sign(payload, env.JWT_SECRET, {
+        expiresIn: env.JWT_EXPIRES_IN as any,
+      });
+    }
+
+    export function verifyToken(token: string): TokenPayload {
+      return jwt.verify(token, env.JWT_SECRET) as unknown as TokenPayload;
+    }
+
+EXPLICATION :
+
+  JWT (JSON Web Token)
+    Structure en 3 parties base64 separees par des points :
+    - header : algorithme utilise (HS256)
+    - payload : donnees (sub, email, role, iat, exp)
+    - signature : HMAC-SHA256 du header+payload avec JWT_SECRET
+
+  jwt.sign()
+    Ajoute automatiquement iat (issued at) et exp (expires at) selon
+    JWT_EXPIRES_IN = '8h'.
+
+  jwt.verify()
+    Verifie la signature ET que le token n'est pas expire. Lance une
+    exception si l'une ou l'autre condition echoue — le middleware
+    requireAuth capture cette exception.
+
+
+7.9 FICHIER : src/middlewares/auth.ts — Authentification et autorisation
+--------------------------------------------------------------------------
+
+CONTENU COMPLET :
+
+    import { Request, Response, NextFunction } from 'express';
+    import { verifyToken } from '../utils/token';
+    import { UserRole } from '../types';
+
+    export function requireAuth(req, res, next) {
+      const token = req.cookies?.token;
+      if (!token) {
+        return res.status(401).json({ message: 'Authentification requise' });
+      }
+      try {
+        const payload = verifyToken(token);
+        req.user = payload;
+        next();
+      } catch {
+        return res.status(401).json({ message: 'Session invalide ou expiree' });
+      }
+    }
+
+    export function requireRole(...allowed: UserRole[]) {
+      return (req, res, next) => {
+        if (!req.user) return res.status(401).json({ message: 'Authentification requise' });
+        if (req.user.role === 'administrateur') return next();
+        if (allowed.includes(req.user.role)) return next();
+        return res.status(403).json({ message: 'Permissions insuffisantes' });
+      };
+    }
+
+EXPLICATION :
+
+  Cookie httpOnly
+    Le JWT est stocke dans un cookie httpOnly, inaccessible par JavaScript
+    cote client (document.cookie ne le voit pas). Protection contre le XSS
+    (Cross-Site Scripting) : meme si un attaquant injecte du JS, il ne
+    peut pas voler le token.
+
+  req.cookies?.token
+    ?: est l'optional chaining — evite une erreur si cookies est undefined.
+
+  req.user = payload
+    Apres verification, on attache le payload decode a req.user. Tous les
+    handlers suivants dans la chaine connaissent l'identite du demandeur.
+
+  Fermeture (closure) dans requireRole
+    requireRole('veterinaire') retourne une FONCTION middleware qui a acces
+    a 'allowed' via la fermeture. Pattern "factory de middleware".
+
+  Hierarchie admin > vet > assistant
+    L'administrateur a automatiquement le droit de tout faire. Un veterinaire
+    peut faire ce qui est autorise pour les veterinaires et assistants.
+
+  401 vs 403
+    401 = non authentifie (pas de session)
+    403 = authentifie mais pas autorise
+    Les deux sont distincts et importants pour le frontend.
+
+
+7.10 FICHIER : src/middlewares/validate.ts — Validation Zod
+-------------------------------------------------------------
+
+CONTENU COMPLET :
+
+    import { Request, Response, NextFunction } from 'express';
+    import { ZodError, ZodSchema } from 'zod';
+
+    export function validate(
+      schema: ZodSchema,
+      where: 'body' | 'params' | 'query' = 'body'
+    ) {
+      return (req, res, next) => {
+        const result = schema.safeParse(req[where]);
+
+        if (!result.success) {
+          const flat = (result.error as ZodError).flatten();
+          return res.status(400).json({
+            message: 'Validation failed',
+            errors: flat.fieldErrors,
+          });
+        }
+
+        if (where === 'body') {
+          req.body = result.data;
+        } else {
+          const target = req[where] as Record<string, unknown>;
+          for (const key in target) delete target[key];
+          Object.assign(target, result.data);
+        }
+
+        next();
+      };
+    }
+
+EXPLICATION :
+
+  schema.safeParse()
+    Contrairement a schema.parse(), safeParse() ne leve pas d'exception
+    — elle retourne { success: true, data } ou { success: false, error }.
+
+  .flatten()
+    Transforme l'arbre d'erreurs Zod en objet plat :
+    { "fieldErrors": { "email": ["Format invalide"] } }
+    Le frontend peut afficher les erreurs par champ directement.
+
+  Remplacement de req.body
+    Apres validation, req.body contient les donnees coercees par Zod
+    (ex: .toLowerCase() sur l'email). Le controller recoit des donnees
+    propres, pas les donnees brutes du client.
+
+
+7.11 FICHIER : src/middlewares/errorHandler.ts
+------------------------------------------------
+
+CONTENU COMPLET :
+
+    export function errorHandler(err, _req, res, _next) {
+      const status = err.status ?? 500;
+      console.error('[Error]', err);
+
+      if (err.code === '23505') {
+        return res.status(409).json({ message: 'Conflit : valeur deja existante' });
+      }
+
+      if (err.code === '23503') {
+        return res.status(400).json({ message: 'Reference invalide' });
+      }
+
+      return res.status(status).json({
+        message: err.message || 'Erreur serveur',
+        ...(env.NODE_ENV === 'development' ? { stack: err.stack } : {}),
+      });
+    }
+
+EXPLICATION :
+
+  4 parametres obligatoires
+    Express reconnaît un middleware comme gestionnaire d'erreurs uniquement
+    s'il a exactement 4 parametres (err, req, res, next). Si on en enleve
+    un, il devient un middleware normal et ne reçoit jamais les erreurs.
+
+  Codes d'erreur PostgreSQL
+    23505 : Violation de contrainte UNIQUE (email deja pris) -> 409 Conflict
+    23503 : Violation de cle etrangere (proprietaire_id inexistant) -> 400
+
+  Stack trace cachee en production
+    En production, la stack trace n'est pas incluse dans la reponse.
+    Elle revealerait les chemins de fichiers et versions de bibliotheques
+    qui pourraient aider un attaquant.
+
+
+7.12 FICHIER : src/validators/auth.ts — Schemas Zod
+-----------------------------------------------------
+
+CONTENU COMPLET :
+
+    import { z } from 'zod';
+
+    export const loginSchema = z.object({
+      email: z
+        .string({ message: "L'email est obligatoire" })
+        .email('Format email invalide')
+        .toLowerCase(),
+      password: z
+        .string({ message: 'Le mot de passe est obligatoire' })
+        .min(8, 'Le mot de passe doit contenir au moins 8 caracteres'),
+    });
+
+    export type LoginInput = z.infer<typeof loginSchema>;
+
+    export const registerSchema = z.object({
+      email: z.string().email('Format email invalide').toLowerCase(),
+      password: z.string().min(8, 'Le mot de passe doit contenir au moins 8 caracteres'),
+      role: z.enum(['administrateur', 'veterinaire', 'assistant'], {
+        message: 'Role invalide',
+      }),
+    });
+
+    export type RegisterInput = z.infer<typeof registerSchema>;
+
+EXPLICATION :
+
+  z.infer<typeof loginSchema>
+    Zod genere automatiquement le type TypeScript a partir du schema.
+    LoginInput sera { email: string; password: string }. Source unique
+    de verite : le schema ET le type viennent du meme endroit.
+
+  .toLowerCase()
+    Transforme l'email en minuscules avant validation. 'Marie@Vetcare.fr'
+    devient 'marie@vetcare.fr'. Coherence avec la base de donnees.
+
+  z.enum([...])
+    Valide que role est l'une des 3 valeurs — meme liste que le ENUM
+    PostgreSQL et le type TypeScript. Coherence totale entre les 3 couches.
+
+
+7.13 FICHIER : src/models/UserModel.ts
+----------------------------------------
+
+CONTENU COMPLET :
+
+    import { query } from '../config/db';
+    import { User, UserRole } from '../types';
+
+    export class UserModel {
+      static async findAll(): Promise<User[]> {
+        const sql = `SELECT reference_user, email, password_hash, role,
+                            is_active, created_at, updated_at
+                     FROM users ORDER BY created_at DESC`;
+        return query<User>(sql);
+      }
+
+      static async findById(id: number): Promise<User | null> {
+        const sql = `SELECT reference_user, email, password_hash, role,
+                            is_active, created_at, updated_at
+                     FROM users WHERE reference_user = $1`;
+        const rows = await query<User>(sql, [id]);
+        return rows[0] ?? null;
+      }
+
+      static async findByEmail(email: string): Promise<User | null> {
+        const sql = `SELECT reference_user, email, password_hash, role,
+                            is_active, created_at, updated_at
+                     FROM users WHERE email = $1`;
+        const rows = await query<User>(sql, [email]);
+        return rows[0] ?? null;
+      }
+
+      static async create(data: CreateUserInput): Promise<User> {
+        const sql = `INSERT INTO users (email, password_hash, role)
+                     VALUES ($1, $2, $3)
+                     RETURNING reference_user, email, password_hash, role,
+                               is_active, created_at, updated_at`;
+        const rows = await query<User>(sql, [data.email, data.password_hash, data.role]);
+        return rows[0];
+      }
+
+      static async update(id: number, data: UpdateUserInput): Promise<User | null> {
+        const entries = Object.entries(data).filter(([, v]) => v !== undefined);
+        if (entries.length === 0) return this.findById(id);
+
+        const setClause = entries.map(([k], i) => `${k} = $${i + 1}`).join(', ');
+        const values = entries.map(([, v]) => v);
+
+        const sql = `UPDATE users SET ${setClause}
+                     WHERE reference_user = $${entries.length + 1}
+                     RETURNING reference_user, email, password_hash, role,
+                               is_active, created_at, updated_at`;
+        const rows = await query<User>(sql, [...values, id]);
+        return rows[0] ?? null;
+      }
+
+      static async setActive(id: number, active: boolean): Promise<User | null> {
+        const sql = `UPDATE users SET is_active = $1
+                     WHERE reference_user = $2
+                     RETURNING reference_user, email, password_hash, role,
+                               is_active, created_at, updated_at`;
+        const rows = await query<User>(sql, [active, id]);
+        return rows[0] ?? null;
+      }
+    }
+
+EXPLICATION :
+
+  $1 et non ${email}
+    La valeur est passee separement en tant que parametre. pg echappe la
+    valeur — ' OR '1'='1 devient une chaine litterale, pas du SQL injecte.
+
+  rows[0] ?? null
+    ?? (nullish coalescing) retourne null si rows[0] est undefined (tableau
+    vide). Retourner null pour "non trouve" est plus explicite qu'undefined.
+
+  Mise a jour partielle dynamique
+    On ne met a jour que les champs fournis. Si seul 'role' est passe, le
+    SQL genere sera : UPDATE users SET role = $1 WHERE reference_user = $2.
+    email et password_hash ne sont pas touches.
+
+  RETURNING
+    PostgreSQL retourne les colonnes demandees de la ligne nouvellement
+    inseree/modifiee. Evite un second SELECT pour recuperer l'ID genere.
+
+
+7.14 FICHIER : src/models/PatientModel.ts — Transaction
+---------------------------------------------------------
+
+EXPLICATION DE LA METHODE create() :
+
+    static async create(data: CreatePatientInput): Promise<Patient> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        // Inserer le patient
+        const { rows: patientRows } = await client.query(insertPatient, [...]);
+        const patient = patientRows[0];
+
+        // Creer automatiquement le dossier vide
+        await client.query('INSERT INTO dossier (patient_id) VALUES ($1)',
+                           [patient.reference_patient]);
+
+        await client.query('COMMIT');
+        return patient;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+POURQUOI UNE TRANSACTION ICI ?
+  La user story US-14 exige "dossier cree automatiquement a la creation du
+  patient (relation 1,1)". On utilise une transaction pour garantir l'atomicite :
+  - Si l'INSERT dans patients reussit mais celui dans dossier echoue :
+    ROLLBACK efface l'insertion du patient. Jamais un patient sans dossier.
+  - Si les deux reussissent : COMMIT valide les deux ensemble.
+
+  pool.connect()
+    Une transaction doit s'executer sur la MEME connexion du debut a la fin.
+    pool.connect() reserve une connexion specifique.
+
+  finally { client.release() }
+    Toujours execute, meme en cas d'erreur. Rend la connexion au pool. Sans
+    ca, le pool se viderait progressivement et l'application refuserait de
+    nouvelles connexions.
+
+
+7.15 FICHIER : src/controllers/AuthController.ts
+--------------------------------------------------
+
+CONTENU COMPLET :
+
+    const COOKIE_OPTIONS = {
+      httpOnly: true,
+      sameSite: 'lax' as const,
+      secure: env.COOKIE_SECURE,
+      maxAge: 8 * 60 * 60 * 1000,
+      path: '/',
+    };
+
+    export class AuthController {
+      static async login(req, res, next) {
+        try {
+          const { email, password } = req.body as LoginInput;
+          const user = await UserModel.findByEmail(email);
+
+          if (!user || !user.is_active) {
+            return res.status(401).json({ message: 'Identifiants invalides' });
+          }
+
+          const valid = await verifyPassword(user.password_hash, password);
+          if (!valid) {
+            return res.status(401).json({ message: 'Identifiants invalides' });
+          }
+
+          const token = signToken({
+            sub: user.reference_user,
+            email: user.email,
+            role: user.role,
+          });
+
+          res.cookie('token', token, COOKIE_OPTIONS);
+
+          const { password_hash, ...publicUser } = user;
+          void password_hash;
+          return res.status(200).json(publicUser);
+        } catch (err) {
+          next(err);
+        }
+      }
+
+      static async logout(_req, res) {
+        res.clearCookie('token', COOKIE_OPTIONS);
+        return res.status(204).send();
+      }
+
+      static async register(req, res, next) {
+        try {
+          const { email, password, role } = req.body as RegisterInput;
+          const existing = await UserModel.findByEmail(email);
+          if (existing) {
+            return res.status(409).json({ message: 'Email deja utilise' });
+          }
+          const password_hash = await hashPassword(password);
+          const created = await UserModel.create({ email, password_hash, role });
+          const { password_hash: _, ...publicUser } = created;
+          void _;
+          return res.status(201).json(publicUser);
+        } catch (err) {
+          next(err);
+        }
+      }
+
+      static async me(req, res, next) {
+        try {
+          if (!req.user) return res.status(401).json({ message: 'Non authentifie' });
+          const user = await UserModel.findById(req.user.sub);
+          if (!user) return res.status(404).json({ message: 'Utilisateur introuvable' });
+          const { password_hash, ...publicUser } = user;
+          void password_hash;
+          return res.status(200).json(publicUser);
+        } catch (err) {
+          next(err);
+        }
+      }
+    }
+
+EXPLICATION :
+
+  Options du cookie JWT
+    httpOnly: true   -> JS ne peut pas lire ce cookie (protection XSS)
+    sameSite: 'lax'  -> Cookie envoye sur navigation top-level, pas sur
+                        requetes cross-site tierces (protection CSRF)
+    secure: bool     -> En production (HTTPS), cookie envoye que sur HTTPS
+    maxAge: 8h en ms -> Cookie expire apres 8h dans le navigateur
+
+  Message d'erreur generique
+    'Identifiants invalides' — meme message que l'utilisateur n'existe pas
+    OU que le mot de passe est faux. Si les messages differaient, un
+    attaquant pourrait enumerer les comptes valides.
+
+  Destructuring + Omit
+    const { password_hash, ...publicUser } = user
+    publicUser contient tout sauf le hash. Le hash ne quitte jamais le
+    serveur.
+
+  next(err)
+    En cas d'erreur inattendue, on passe au middleware errorHandler.
+    La gestion d'erreurs est centralisee, pas dans chaque controller.
+
+
+7.16 FICHIER : src/routes/index.ts + src/routes/auth.ts
+---------------------------------------------------------
+
+CONTENU index.ts :
+
+    const router = Router();
+    router.use('/auth', authRouter);
+    router.use('/proprietaires', proprietairesRouter);
+    router.use('/patients', patientsRouter);
+    router.use('/dossiers', dossiersRouter);
+    router.use('/consultations', consultationsRouter);
+    router.use('/traitements', traitementsRouter);
+    router.use('/dashboard', dashboardRouter);
+    router.get('/health', (_req, res) => res.json({ status: 'ok' }));
+    export default router;
+
+CONTENU auth.ts :
+
+    const router = Router();
+    router.post('/login', validate(loginSchema), AuthController.login);
+    router.post('/logout', AuthController.logout);
+    router.get('/me', requireAuth, AuthController.me);
+    router.post(
+      '/register',
+      requireAuth,
+      requireRole('administrateur'),
+      validate(registerSchema),
+      AuthController.register
+    );
+    export default router;
+
+EXPLICATION :
+
+  /health endpoint
+    Docker et les load balancers utilisent cette route pour savoir si le
+    service est vivant. Public, jamais d'info sensible.
+
+  Chaine de middleware pour /register
+    La requete passe par :
+    1. requireAuth    -> verifie le JWT cookie
+    2. requireRole    -> verifie que c'est un admin
+    3. validate       -> verifie que le body est valide
+    4. AuthController.register -> cree l'utilisateur
+    Si n'importe quel middleware renvoie une erreur, la chaine s'arrete.
+
+
+================================================================================
+8. ETAPE 4 — FRONTEND REACT
+================================================================================
+
+8.1 FICHIER : styles/tokens.css — Design System
+-------------------------------------------------
+
+CONTENU COMPLET :
+
+    :root {
+      --color-cream:        #F5F0E8;
+      --color-warm:         #EDE5D5;
+      --color-sand:         #D6C9B0;
+      --color-ink:          #1C1A17;
+      --color-ink-soft:     #2A2722;
+      --color-text:         #1C1A17;
+      --color-text-muted:   #7A7265;
+      --color-text-on-ink:  #F5F0E8;
+      --color-accent:       #4A7C6F;
+      --color-accent-light: #6FA99A;
+      --color-accent-soft:  #C7D9D1;
+      --color-success:      #4A7C6F;
+      --color-danger:       #B5443A;
+      --color-border:       #D6C9B0;
+      --color-border-soft:  #E8DFCC;
+
+      --font-display: 'Cormorant Garamond', 'Times New Roman', serif;
+      --font-body: 'Jost', 'Helvetica Neue', sans-serif;
+
+      --fs-xs:   0.75rem;    /* 12px */
+      --fs-sm:   0.875rem;   /* 14px */
+      --fs-base: 1rem;       /* 16px */
+      --fs-lg:   1.125rem;   /* 18px */
+      --fs-xl:   1.5rem;     /* 24px */
+      --fs-2xl:  2rem;       /* 32px */
+      --fs-3xl:  3rem;       /* 48px */
+
+      --space-1:  0.25rem;   /*  4px */
+      --space-2:  0.5rem;    /*  8px */
+      --space-3:  0.75rem;   /* 12px */
+      --space-4:  1rem;      /* 16px */
+      --space-5:  1.5rem;    /* 24px */
+      --space-6:  2rem;      /* 32px */
+      --space-8:  3rem;      /* 48px */
+      --space-10: 4rem;      /* 64px */
+      --space-12: 6rem;      /* 96px */
+
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
+      --shadow-lg: 0 10px 30px rgba(0,0,0,0.08);
+
+      --max-width-content: 1200px;
+      --header-height: 72px;
+      --sidebar-width: 240px;
+    }
+
+EXPLICATION :
+
+  Variables CSS (Custom Properties)
+    Au lieu de hardcoder '#4A7C6F' dans chaque composant, tous utilisent
+    'var(--color-accent)'. Changer la couleur d'accent ici met a jour
+    toute l'application instantanement.
+
+  :root
+    Selecteur du noeud racine HTML (<html>). Les variables definies ici
+    sont heritees par tous les elements — portee globale.
+
+  Echelle typographique
+    Les tailles de police sont proportionnelles (0.75, 0.875, 1, 1.125...).
+    Pas de valeurs arbitraires. Coherence visuelle garantie.
+
+  Grille d'espacement 4px
+    --space-1 = 4px, --space-2 = 8px... Tous les espacements sont des
+    multiples de 4. Alignement visuel cohérent.
+
+
+8.2 FICHIER : src/main.tsx — Point d'entree React
+---------------------------------------------------
+
+CONTENU COMPLET :
+
+    import React from 'react';
+    import ReactDOM from 'react-dom/client';
+    import App from './App';
+    import './styles/global.css';
+
+    ReactDOM.createRoot(document.getElementById('root')!).render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>
+    );
+
+EXPLICATION :
+
+  createRoot
+    API React 18+. Permet le "Concurrent Mode" — React peut interrompre
+    et reprendre le rendu pour des interfaces plus reactives.
+
+  document.getElementById('root')!
+    Le ! (non-null assertion) dit a TypeScript "je garantis que cet element
+    existe". Il est defini dans index.html : <div id="root"></div>.
+
+  React.StrictMode
+    En developpement, React double-rend les composants pour detecter les
+    effets de bord involontaires. N'a aucun impact en production.
+
+
+8.3 FICHIER : src/App.tsx — Routeur principal
+----------------------------------------------
+
+CONTENU COMPLET :
+
+    export default function App() {
+      return (
+        <BrowserRouter>
+          <AuthProvider>
+            <Routes>
+              <Route element={<PublicLayout />}>
+                <Route path="/" element={<LandingPage />} />
+              </Route>
+              <Route path="/login" element={<LoginPage />} />
+
+              <Route element={
+                <PrivateRoute>
+                  <DashboardLayout />
+                </PrivateRoute>
+              }>
+                <Route path="/dashboard"     element={<DashboardPage />} />
+                <Route path="/patients"      element={<PatientsPage />} />
+                <Route path="/proprietaires" element={<ProprietairesPage />} />
+                <Route path="/consultations" element={<ConsultationsPage />} />
+                <Route path="/dossiers"      element={<DossiersPage />} />
+                <Route path="/traitements"   element={<TraitementsPage />} />
+              </Route>
+
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </AuthProvider>
+        </BrowserRouter>
+      );
+    }
+
+EXPLICATION :
+
+  BrowserRouter
+    Utilise l'API history du navigateur pour naviguer sans rechargement de
+    page. L'URL change sans envoi de requete HTTP — React Router intercepte
+    la navigation cote client.
+
+  AuthProvider
+    Enveloppe l'application entiere. Tous les composants enfants peuvent
+    acceder a l'etat d'authentification via useAuth().
+
+  Routes imbriquees
+    Les Routes imbriquees partagent le layout parent. Toutes les routes
+    sous PrivateRoute+DashboardLayout partagent la sidebar et le header.
+    <Outlet /> dans DashboardLayout rend la page enfant active.
+
+  path="*"
+    Catch-all — toute URL non reconnue affiche NotFoundPage (page 404).
+
+
+8.4 FICHIER : src/lib/api.ts — Instance Axios
+----------------------------------------------
+
+CONTENU COMPLET :
+
+    import axios from 'axios';
+
+    export const api = axios.create({
+      baseURL: '/api',
+      withCredentials: true,
+      timeout: 10_000,
+    });
+
+    api.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          const isLoginRequest = error.config?.url?.includes('/auth/login');
+          if (!isLoginRequest && window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+        }
+        return Promise.reject(error);
+      }
+    );
+
+EXPLICATION :
+
+  baseURL: '/api'
+    Toutes les requetes Axios sont prefixees par /api. En developpement,
+    Vite proxifie /api vers le backend (port 4000). En production, Nginx
+    proxifie vers le backend. Le code frontend ne change pas entre les
+    environnements.
+
+  withCredentials: true
+    Envoie les cookies sur chaque requete. Sans ca, le cookie JWT ne serait
+    pas transmis et toutes les requetes authentifiees retourneraient 401.
+
+  Intercepteur 401
+    Si n'importe quelle requete API retourne 401 (session expiree), l'utilisateur
+    est automatiquement redirige vers /login. Pas besoin de gerer ca dans
+    chaque page ou composant.
+
+  Protection boucle infinie
+    Si la requete qui a echoue etait vers /auth/login, on ne redirige pas
+    (evite une boucle infinie /login -> 401 -> /login...).
+
+
+8.5 FICHIER : src/context/AuthContext.tsx
+------------------------------------------
+
+CONTENU COMPLET :
+
+    const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+    export function AuthProvider({ children }) {
+      const [user, setUser] = useState<PublicUser | null>(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        authApi.me()
+          .then((u) => setUser(u))
+          .finally(() => setLoading(false));
+      }, []);
+
+      const login = async (email, password) => {
+        const u = await authApi.login(email, password);
+        setUser(u);
+      };
+
+      const logout = async () => {
+        await authApi.logout();
+        setUser(null);
+      };
+
+      return (
+        <AuthContext.Provider value={{ user, loading, login, logout }}>
+          {children}
+        </AuthContext.Provider>
+      );
+    }
+
+    export function useAuth(): AuthContextValue {
+      const ctx = useContext(AuthContext);
+      if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
+      return ctx;
+    }
+
+EXPLICATION :
+
+  undefined par defaut
+    Si un composant utilise useAuth() en dehors de AuthProvider, il obtient
+    undefined. Le hook detecte ca et leve une erreur explicite.
+
+  useEffect au montage
+    Au demarrage de l'application, on appelle GET /api/auth/me. Si un cookie
+    JWT valide existe, le backend retourne l'utilisateur connecte. Sinon, 401.
+    loading = true pendant cet appel empeche PrivateRoute de rediriger vers
+    /login avant d'avoir la reponse.
+
+  Hook personnalise avec guard
+    useAuth() est le seul moyen d'acceder a AuthContext. Le guard 'if (!ctx)'
+    donne une erreur claire si le hook est mal utilise.
+
+
+8.6 FICHIER : src/routes/PrivateRoute.tsx — Garde d'authentification
+----------------------------------------------------------------------
+
+CONTENU COMPLET :
+
+    export function PrivateRoute({ children }) {
+      const { user, loading } = useAuth();
+      const location = useLocation();
+
+      if (loading) {
+        return (
+          <div style={{ display: 'grid', placeItems: 'center', minHeight: '60vh' }}>
+            <Spinner size={36} />
+          </div>
+        );
+      }
+
+      if (!user) {
+        return <Navigate to="/login" replace state={{ from: location }} />;
+      }
+
+      return <>{children}</>;
+    }
+
+EXPLICATION :
+
+  Attendre le chargement
+    Si l'etat d'authentification est encore en cours de verification
+    (loading = true), afficher un spinner. Sans ca, au rechargement de
+    /dashboard, l'utilisateur verrait /login pendant 200ms avant confirmation.
+
+  state={{ from: location }}
+    Stocke l'URL actuelle dans l'etat de navigation. Apres connexion reussie,
+    LoginPage redirige vers location.state.from.pathname — l'utilisateur
+    atterrit directement sur la page qu'il voulait visiter.
+
+  replace
+    Remplace l'entree courante dans l'historique. Appuyer "retour" depuis
+    /login ne revient pas a /dashboard (inutile si non connecte).
+
+
+8.7 FICHIER : src/layouts/DashboardLayout.tsx
+----------------------------------------------
+
+CONTENU COMPLET :
+
+    export function DashboardLayout() {
+      const { user, logout } = useAuth();
+      const navigate = useNavigate();
+
+      const handleLogout = async () => {
+        await logout();
+        navigate('/login', { replace: true });
+      };
+
+      return (
+        <div style={{ display: 'flex', minHeight: '100vh' }}>
+          <a href="#main-content" className="skip-link">
+            Aller au contenu principal
+          </a>
+          <Sidebar />
+
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <header style={{ height: 'var(--header-height)', ... }}>
+              {user?.email} ({user?.role})
+              <Button variant="secondary" size="sm" onClick={handleLogout}>
+                Deconnexion
+              </Button>
+            </header>
+
+            <main id="main-content" style={{ flex: 1, padding: 'var(--space-6)' }}>
+              <Outlet />
+            </main>
+          </div>
+        </div>
+      );
+    }
+
+EXPLICATION :
+
+  Skip link
+    <a href="#main-content">Aller au contenu principal</a> — accessibilite
+    WCAG 2.1. Les utilisateurs navigant au clavier peuvent sauter la sidebar
+    et aller directement au contenu. Invisible par defaut, visible au focus.
+
+  <Outlet />
+    Point d'injection React Router. Les composants enfants (DashboardPage,
+    PatientsPage...) sont rendus ici, a l'interieur du layout partage.
+
+  replace: true sur logout
+    Apres deconnexion, l'historique du dashboard est efface. L'utilisateur
+    ne peut pas revenir au dashboard avec le bouton "retour".
+
+
+8.8 COMPOSANT ATOM : src/components/atoms/Button.tsx
+------------------------------------------------------
+
+CONTENU COMPLET :
+
+    interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+      variant?: 'primary' | 'secondary' | 'danger';
+      size?: 'sm' | 'md';
+      children: ReactNode;
+    }
+
+    export function Button({ variant = 'primary', size = 'md', children, style, ...rest }) {
+      const base = {
+        fontFamily: 'var(--font-body)',
+        fontWeight: 500,
+        letterSpacing: '0.05em',
+        textTransform: 'uppercase',
+        border: 'none',
+        borderRadius: 'var(--radius-sm)',
+        cursor: 'pointer',
+        transition: 'opacity 0.2s, transform 0.1s',
+        fontSize: size === 'sm' ? 'var(--fs-xs)' : 'var(--fs-sm)',
+        padding: size === 'sm'
+          ? 'var(--space-2) var(--space-4)'
+          : 'var(--space-3) var(--space-6)',
+      };
+
+      const variants = {
+        primary:   { background: 'var(--color-ink)', color: 'var(--color-text-on-ink)' },
+        secondary: { background: 'transparent', color: 'var(--color-ink)',
+                     border: '1px solid var(--color-ink)' },
+        danger:    { background: 'var(--color-danger)', color: 'var(--color-text-on-ink)' },
+      };
+
+      const disabledStyle = rest.disabled ? { opacity: 0.5, cursor: 'not-allowed' } : {};
+
+      return (
+        <button {...rest} style={{ ...base, ...variants[variant], ...disabledStyle, ...style }}>
+          {children}
+        </button>
+      );
+    }
+
+EXPLICATION :
+
+  extends ButtonHTMLAttributes
+    Le composant herite de tous les props natifs HTML du bouton (onClick,
+    disabled, type, aria-label...). On n'a pas besoin de les redeclarer.
+
+  ...rest
+    Rest props — tout ce qui n'est pas variant, size, children, style est
+    collecte dans rest et propage au <button> natif.
+
+  Spread styles
+    { ...base, ...variants[variant], ...disabledStyle, ...style }
+    Les styles sont fusionnes dans l'ordre. Le style passe en prop (en
+    dernier) peut surcharger n'importe quel style par defaut.
+
+
+8.9 COMPOSANT MOLECULE : src/components/molecules/KpiCard.tsx
+--------------------------------------------------------------
+
+CONTENU COMPLET :
+
+    export function KpiCard({ value, label, hint }) {
+      return (
+        <div style={{
+          background: 'var(--color-cream)',
+          border: '1px solid var(--color-border-soft)',
+          borderLeft: '3px solid var(--color-accent)',
+          borderRadius: 'var(--radius-md)',
+          padding: 'var(--space-5)',
+          minHeight: 120,
+        }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--fs-2xl)' }}>
+            {value}
+          </div>
+          <div style={{ fontSize: 'var(--fs-xs)', textTransform: 'uppercase' }}>
+            {label}
+          </div>
+          {hint && <div style={{ color: 'var(--color-accent)' }}>{hint}</div>}
+        </div>
+      );
+    }
+
+EXPLICATION :
+
+  Atomic Design — Molecule
+    Une KpiCard combine un nombre (value), un libelle (label) et un
+    indicateur optionnel (hint). Trop complexe pour etre un atome, trop
+    simple pour etre un organisme.
+
+  {hint && <div>}
+    Rendu conditionnel — si hint est undefined ou null, rien n'est rendu.
+    JavaScript && retourne le deuxieme operande si le premier est truthy.
+
+
+8.10 PAGE : src/pages/DashboardPage.tsx
+-----------------------------------------
+
+CONTENU COMPLET :
+
+    export function DashboardPage() {
+      const [stats, setStats] = useState<DashboardStats | null>(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        dashboardApi.stats()
+          .then((s) => { if (!cancelled) setStats(s); })
+          .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+      }, []);
+
+      return (
+        <>
+          <h1>Tableau de bord</h1>
+          {loading ? <Spinner /> : stats ? (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: 'var(--space-5)',
+            }}>
+              <KpiCard value={stats.animaux_suivis} label="Animaux suivis" />
+              <KpiCard value={stats.consultations_semaine} label="Consultations cette semaine" />
+              <KpiCard value={stats.traitements_en_cours} label="Traitements en cours" />
+            </div>
+          ) : (
+            <p>Impossible de charger les statistiques.</p>
+          )}
+        </>
+      );
+    }
+
+EXPLICATION :
+
+  Cleanup function
+    return () => { cancelled = true; } — executee quand le composant est
+    demonte. Si le composant est demonte avant que la requete API revienne
+    (navigation rapide), cancelled = true empeche setState sur un composant
+    mort (fuite memoire, warning React).
+
+  repeat(auto-fit, minmax(220px, 1fr))
+    CSS Grid responsive sans media query. Les cartes font au minimum 220px.
+    S'il y a assez de place, elles se repartissent sur une ligne. Sur mobile,
+    elles s'empilent automatiquement.
+
+
+8.11 PAGE : src/pages/LoginPage.tsx
+-------------------------------------
+
+EXPLICATION CLE :
+
+  react-hook-form
+    useForm() gere l'etat des formulaires sans re-render a chaque frappe.
+    register('email', { required, pattern }) associe le champ au formulaire.
+    handleSubmit(onSubmit) valide le formulaire avant d'appeler onSubmit.
+    mode: 'onBlur' valide quand l'utilisateur quitte le champ.
+
+  Distinction erreurs serveur / erreurs client
+    errors.email vient de react-hook-form (validation locale).
+    serverError vient du backend (email inexistant, compte desactive).
+    Les deux sont affiches differemment.
+
+  Redirection post-login
+    location.state?.from?.pathname — si l'utilisateur venait de /patients,
+    apres login il retourne a /patients. Sinon, /dashboard par defaut.
+
+
+8.12 COMPOSANT ORGANISM : src/components/organisms/Sidebar.tsx
+----------------------------------------------------------------
+
+CONTENU COMPLET :
+
+    const NAV_ITEMS = [
+      { to: '/dashboard',     label: 'Tableau de bord' },
+      { to: '/patients',      label: 'Patients' },
+      { to: '/proprietaires', label: 'Proprietaires' },
+      { to: '/consultations', label: 'Consultations' },
+      { to: '/dossiers',      label: 'Dossiers medicaux' },
+      { to: '/traitements',   label: 'Traitements' },
+    ];
+
+    export function Sidebar() {
+      return (
+        <aside style={{
+          width: 'var(--sidebar-width)',
+          minHeight: '100vh',
+          background: 'var(--color-ink)',
+          color: 'var(--color-text-on-ink)',
+          position: 'sticky',
+          top: 0,
+        }}>
+          <div style={{ fontWeight: 600, letterSpacing: '0.2em' }}>
+            VET<span style={{ color: 'var(--color-accent-light)' }}>CARE</span>
+          </div>
+
+          <nav aria-label="Navigation interne">
+            <ul style={{ listStyle: 'none' }}>
+              {NAV_ITEMS.map((item) => (
+                <li key={item.to}>
+                  <NavLink
+                    to={item.to}
+                    style={({ isActive }) => ({
+                      display: 'block',
+                      color: isActive ? 'var(--color-accent-light)' : 'var(--color-text-on-ink)',
+                      borderLeft: isActive ? '2px solid var(--color-accent-light)' : '2px solid transparent',
+                      textDecoration: 'none',
+                    })}
+                  >
+                    {item.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </aside>
+      );
+    }
+
+EXPLICATION :
+
+  NAV_ITEMS array
+    Configuration declarative — pour ajouter une page, on ajoute une ligne.
+    Pas de repetition de code JSX.
+
+  NavLink avec isActive
+    NavLink applique des styles differents quand l'URL correspond a la route.
+    La forme render-prop ({ isActive }) => style permet d'inliner les styles.
+
+  aria-label="Navigation interne"
+    Accessibilite WCAG — les lecteurs d'ecran annoncent "Navigation interne"
+    quand l'utilisateur entre dans ce <nav>.
+
+  position: sticky; top: 0
+    La sidebar reste visible meme quand on scrolle le contenu. Essentiel
+    pour la navigation.
+
+
+================================================================================
+9. ETAPE 5 — TESTS
+================================================================================
+
+9.1 TESTS UNITAIRES : tests/unit/password.test.ts
+---------------------------------------------------
+
+    describe('password utils', () => {
+      it('should hash a password and verify it', async () => {
+        const hash = await hashPassword('monMotDePasse123');
+        expect(typeof hash).toBe('string');
+        expect(hash).toMatch(/^\$argon2id/);
+        const valid = await verifyPassword(hash, 'monMotDePasse123');
+        expect(valid).toBe(true);
+      });
+
+      it('should return false for wrong password', async () => {
+        const hash = await hashPassword('monMotDePasse123');
+        const valid = await verifyPassword(hash, 'mauvaisMotDePasse');
+        expect(valid).toBe(false);
+      });
+    });
+
+EXPLICATION :
+
+  expect(hash).toMatch(/^\$argon2id/)
+    Verifie que le hash commence par $argon2id — prefixe standard du format
+    Argon2id. Garantit qu'on utilise bien Argon2id et pas un autre algorithme.
+
+
+9.2 TESTS D'INTEGRATION : tests/integration/auth.test.ts
+----------------------------------------------------------
+
+    describe('POST /api/auth/login', () => {
+      it('should return 401 for invalid credentials', async () => {
+        const res = await request(app).post('/api/auth/login').send({
+          email: 'inexistant@test.com',
+          password: 'password123',
+        });
+        expect(res.status).toBe(401);
+        expect(res.body.message).toBe('Identifiants invalides');
+      });
+
+      it('should return 400 for invalid email format', async () => {
+        const res = await request(app).post('/api/auth/login').send({
+          email: 'pas-un-email',
+          password: 'password123',
+        });
+        expect(res.status).toBe(400);
+      });
+    });
+
+EXPLICATION :
+
+  supertest
+    Permet d'envoyer des requetes HTTP a l'application Express en memoire,
+    sans demarrer un vrai serveur sur un port. Rapide, isole, pas de
+    problemes de ports occupes.
+
+  Couverture >= 80%
+    Exigee par le cahier des charges. La commande :
+    npm test -- --coverage
+    genere un rapport HTML dans backend/coverage/.
+
+
+================================================================================
+10. SECURITE — RECAPITULATIF
+================================================================================
+
+MENACE                     | PROTECTION MISE EN PLACE
+---------------------------|--------------------------------------------------
+Injection SQL              | Requetes parametrees ($1, $2) uniquement
+Vol de session (XSS)       | Cookie httpOnly — JS ne peut pas lire le JWT
+CSRF                       | Cookie SameSite=Lax + CORS strict
+Brute force mots de passe  | Argon2id 64 Mo RAM — ~1000 tentatives/seconde max
+Mots de passe en clair     | Argon2id hash stocke — jamais le mot de passe
+Enumeration de comptes     | Message d'erreur generique sur login
+Clickjacking               | Helmet X-Frame-Options: SAMEORIGIN
+MIME sniffing              | Helmet X-Content-Type-Options: nosniff
+Donnees sensibles en prod  | Stack traces cachees en production
+Acces non autorise         | Middleware requireAuth + requireRole sur toutes routes
+Elevation de privileges    | Hierarchie admin > vet > assistant dans le middleware
+Conteneur root             | Utilisateur non-root 'vetcare' dans le Dockerfile
+
+
+================================================================================
+11. LANCER LE PROJET
+================================================================================
+
+AVEC DOCKER (recommande)
+
+    # Depuis la racine du projet
+    # 1. S'assurer que .env existe avec JWT_SECRET
+    cat .env
+    # Doit contenir : JWT_SECRET=votre_secret_tres_long_ici
+
+    # 2. Lancer tous les services
+    docker compose up --build
+
+    # L'application est accessible a :
+    # http://localhost          -> Frontend React
+    # http://localhost:4000/api/health  -> Verification backend
+
+COMPTES DE DEMONSTRATION (depuis seed.sql) :
+
+    admin@vetcare.fr   /  AdminVet2026!       (Administrateur)
+    marie@vetcare.fr   /  Veterinaire2026!    (Veterinaire)
+    sofia@vetcare.fr   /  Assistant2026!      (Assistant)
+
+EN DEVELOPPEMENT LOCAL (hot reload)
+
+    # Terminal 1 — Base de donnees seulement
+    docker compose up db
+
+    # Terminal 2 — Backend (rechargement automatique)
+    cd backend
+    npm install
+    npm run dev     # port 4000
+
+    # Terminal 3 — Frontend (hot-reload Vite)
+    cd frontend
+    npm install
+    npm run dev     # port 5173
+
+LANCER LES TESTS
+
+    # Backend
+    cd backend
+    npm test                    # jest, mode silencieux
+    npm test -- --coverage      # rapport de couverture dans coverage/
+
+    # Frontend
+    cd frontend
+    npm test                    # vitest
+
+
+================================================================================
+CONCLUSION
+================================================================================
+
+VetCare est une application web complete qui couvre l'integralite du cycle de
+vie d'un projet : conception -> modelisation -> developpement -> tests ->
+deploiement.
+
+POINTS FORTS TECHNIQUES :
+
+1. Architecture 3-tiers clairement separee (frontend / backend / base de donnees)
+2. Securite a chaque couche (Argon2id, JWT httpOnly, requetes parametrees, Helmet)
+3. Contraintes d'integrite au niveau base de donnees (UNIQUE, FK, triggers)
+4. Typage fort de bout en bout (TypeScript + Zod = coherence garantie)
+5. Containerisation complete Docker (reproductible sur n'importe quelle machine)
+6. Accessibilite WCAG 2.1 AA (skip links, aria, contraste, focus visible)
+7. Tests automatises avec couverture >= 80% du backend
+8. Design system avec variables CSS (tokens.css) — coherence visuelle totale
+9. Separation des responsabilites : controllers / models / routes / middlewares
+10. Arret gracieux Docker (SIGTERM -> drain connexions -> pool.end() -> exit)
+
+CORRESPONDANCE AVEC LE CAHIER DES CHARGES :
+
+US-01 Connexion            -> AuthController.login + JWT httpOnly cookie
+US-02 Deconnexion          -> AuthController.logout + clearCookie
+US-03 Creation compte      -> AuthController.register + requireRole('administrateur')
+US-04 Ajout patient        -> PatientModel.create() avec transaction
+US-05 Consultation dossier -> PatientModel.findById() + routes GET
+US-06 Modification patient -> PatientModel.update() partiel
+US-07 Recherche/Filtrage   -> PatientModel.findAll({ search, espece, actif })
+US-08 Desactivation        -> PatientModel.softDelete() (actif = false)
+US-09 Creation proprietaire-> ProprietaireModel.create()
+US-10 Animaux/proprietaire -> ProprietaireModel.findAnimals()
+US-11 Creer consultation   -> ConsultationModel.create()
+US-12 Statut consultation  -> ConsultationModel.updateStatus()
+US-13 Filtrage consultations-> ConsultationModel.findAll({ status, date })
+US-14 Dossier medical      -> DossierModel.findByPatient() + update()
+US-15 Prescription traitement -> TraitementModel.create()
+US-16 Suivi traitements    -> TraitementModel.findActiveByPatient()
+US-17 Tableau de bord      -> DashboardController.getStats() + KpiCard
+
+================================================================================
+VetCare — Dossier Technique Complet
+Ingrid Gusmao — Etudiante, 2026
+"Les animaux ne parlent pas, mais leurs donnees oui."
+================================================================================

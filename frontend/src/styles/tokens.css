@@ -1,0 +1,76 @@
+/* ------------------------------------------------------------------------- */
+/* Design tokens — single source of truth for colors, fonts, spacing.        */
+/* Every component uses var(--token-name) instead of hardcoding values.      */
+/* Changing a brand color here updates every screen at once.                  */
+/* ------------------------------------------------------------------------- */
+:root {
+  /* === COLORS (extracted from the Figma mockup) === */
+
+  /* Light backgrounds */
+  --color-cream:        #F5F0E8;   /* main page background — warm off-white */
+  --color-warm:         #EDE5D5;   /* alternate sections                    */
+  --color-sand:         #D6C9B0;   /* dividers, subtle accents              */
+
+  /* Dark sections (team grid, dashboard preview) */
+  --color-ink:          #1C1A17;   /* near-black, used for inverted blocks  */
+  --color-ink-soft:     #2A2722;   /* slightly lighter for cards on ink      */
+
+  /* Text */
+  --color-text:         #1C1A17;   /* default body text on light bg          */
+  --color-text-muted:   #7A7265;   /* labels, captions                       */
+  --color-text-on-ink:  #F5F0E8;   /* default text on dark bg                */
+
+  /* Accent — the sage green from the logo and CTAs */
+  --color-accent:       #4A7C6F;   /* primary brand                          */
+  --color-accent-light: #6FA99A;   /* hover state, soft chips                */
+  --color-accent-soft:  #C7D9D1;   /* pastel for "À JOUR" badge background   */
+
+  /* Functional */
+  --color-success:      #4A7C6F;   /* same green — keeps palette tight       */
+  --color-danger:       #B5443A;   /* warm red — fits the warm palette        */
+  --color-border:       #D6C9B0;
+  --color-border-soft:  #E8DFCC;
+
+  /* === TYPOGRAPHY === */
+
+  /* Cormorant Garamond: serif used for big titles (matches "Soins & Bien-Être"). */
+  --font-display: 'Cormorant Garamond', 'Times New Roman', serif;
+
+  /* Jost: clean geometric sans-serif used for body, navs, labels. */
+  --font-body: 'Jost', 'Helvetica Neue', sans-serif;
+
+  /* Type scale — modular, mobile-first. Use these instead of raw px. */
+  --fs-xs:   0.75rem;     /* 12px — captions, tiny labels    */
+  --fs-sm:   0.875rem;    /* 14px — body small               */
+  --fs-base: 1rem;        /* 16px — default                  */
+  --fs-lg:   1.125rem;    /* 18px — emphasized body          */
+  --fs-xl:   1.5rem;      /* 24px — section subtitles        */
+  --fs-2xl:  2rem;        /* 32px — page titles              */
+  --fs-3xl:  3rem;        /* 48px — hero headings            */
+
+  /* === SPACING (4px grid) === */
+  --space-1:  0.25rem;    /*  4px */
+  --space-2:  0.5rem;     /*  8px */
+  --space-3:  0.75rem;    /* 12px */
+  --space-4:  1rem;       /* 16px */
+  --space-5:  1.5rem;     /* 24px */
+  --space-6:  2rem;       /* 32px */
+  --space-8:  3rem;       /* 48px */
+  --space-10: 4rem;       /* 64px */
+  --space-12: 6rem;       /* 96px */
+
+  /* === RADII === */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* === SHADOWS === */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.08);
+
+  /* === LAYOUT === */
+  --max-width-content: 1200px;
+  --header-height: 72px;
+  --sidebar-width: 240px;
+}

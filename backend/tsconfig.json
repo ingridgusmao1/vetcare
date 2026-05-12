@@ -1,0 +1,52 @@
+{
+  "compilerOptions": {
+    // Use a recent ECMAScript target so we can use async/await, optional chaining etc.
+    "target": "ES2022",
+    "lib": ["ES2022"],
+
+    // CommonJS is what Node.js uses by default. ESM works too but adds friction
+    // with some libraries. CommonJS is the safe pick for a junior project.
+    "module": "commonjs",
+
+    // Strict mode = all strict checks ON. Catches "this could be undefined" bugs.
+    // The whole point of TypeScript is wasted without strict mode.
+    "strict": true,
+
+    // Fail compilation on unused locals — keeps the code clean for the demo.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    // Helps when importing CommonJS modules into ESM-style code.
+    "esModuleInterop": true,
+
+    // Make imports case-sensitive (catches Windows-only bugs early).
+    "forceConsistentCasingInFileNames": true,
+
+    // Skip type checking of node_modules — they have their own .d.ts files.
+    // Speeds up the build dramatically.
+    "skipLibCheck": true,
+
+    // Source code lives here.
+    "rootDir": "./src",
+
+    // Compiled JS goes here. Docker copies this folder to run in production.
+    "outDir": "./dist",
+
+    // Generate .d.ts files alongside .js — useful if another package imports us.
+    "declaration": false,
+
+    // Include source maps so stack traces point to .ts lines.
+    "sourceMap": true,
+
+    // Lets us write `import x from './x'` without the .js extension.
+    "moduleResolution": "node",
+
+    // Tells TypeScript which paths to look at when resolving custom types.
+    "typeRoots": ["./node_modules/@types", "./src/types"],
+
+    // Resolve JSON imports (we don't use any, but cheap to allow).
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests"]
+}

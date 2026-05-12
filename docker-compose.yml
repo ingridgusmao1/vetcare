@@ -1,0 +1,92 @@
+# Compose version 3.9 — modern syntax with healthcheck + depends_on conditions.
+version: '3.9'
+
+services:
+  # =========================================================================
+  # PostgreSQL database
+  # =========================================================================
+  db:
+    image: postgres:15-alpine
+    container_name: vetcare_db
+    environment:
+      POSTGRES_USER: ingrid
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: vetcare
+    ports:
+      # Expose 5432 only in dev — comment out in prod to keep the DB private.
+      - '5432:5432'
+    volumes:
+      # Persist data across restarts. Without this, every `docker compose down`
+      # would wipe the DB.
+      - vetcare_db_data:/var/lib/postgresql/data
+      # On first boot, postgres runs every .sql in this folder alphabetically.
+      # Our schema then seed.
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    # Healthcheck: pg_isready returns 0 when the server accepts connections.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d vetcare']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vetcare_net
+    restart: unless-stopped
+
+  # =========================================================================
+  # Express backend
+  # =========================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vetcare_backend
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      # 'db' here is the service name — Docker resolves it to the container.
+      DATABASE_URL: postgres://postgres:postgres@db:5432/vetcare
+      JWT_SECRET: ${JWT_SECRET}                # read from .env in repo root
+      JWT_EXPIRES_IN: 8h
+      CORS_ORIGIN: http://localhost
+      COOKIE_SECURE: 'false'                   # set true behind HTTPS in prod
+    ports:
+      - '4000:4000'
+    depends_on:
+      db:
+        # Wait for the DB to be healthy before starting backend — avoids the
+        # classic "connection refused" race on first up.
+        condition: service_healthy
+    networks:
+      - vetcare_net
+    restart: unless-stopped
+
+  # =========================================================================
+  # React frontend (served by Nginx)
+  # =========================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vetcare_frontend
+    ports:
+      - '80:80'
+    depends_on:
+      - backend
+    networks:
+      - vetcare_net
+    restart: unless-stopped
+
+# ===========================================================================
+# Named volume for DB persistence — survives docker compose down.
+# Removed only by `docker compose down -v` (intentional).
+# ===========================================================================
+volumes:
+  vetcare_db_data:
+
+# ===========================================================================
+# Custom network so all 3 services can reach each other by service name.
+# ===========================================================================
+networks:
+  vetcare_net:
+    driver: bridge

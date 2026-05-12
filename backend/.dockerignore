@@ -1,0 +1,4 @@
+node_modules   # already installed by RUN npm install inside Docker
+dist           # compiled output — rebuilt by RUN npm run build
+.env           # never copy secrets into a Docker image!
+*.md           # documentation files

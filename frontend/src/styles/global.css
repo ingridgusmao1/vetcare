@@ -1,0 +1,115 @@
+/* Import the design fonts from Google Fonts. Putting them in CSS keeps the
+   preconnect logic simple — Vite/Browsers handle it. */
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Jost:wght@300;400;500;600&display=swap');
+
+/* Then load our tokens. Imports must come at the top of the file. */
+@import './tokens.css';
+
+/* ------------------------------------------------------------------------- */
+/* Reset — normalize browser defaults so styling is predictable.             */
+/* ------------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  /* 16px base; users who change browser default get a proportional UI. */
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  line-height: 1.6;
+  color: var(--color-text);
+  background-color: var(--color-cream);
+
+  /* Smooth font rendering on macOS / iOS Safari. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Avoids horizontal scroll on small mobile viewports if a child overflows. */
+  overflow-x: hidden;
+}
+
+/* Headings use the display serif. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Accessibility — WCAG 2.1 AA requirements from the cahier.                  */
+/* ------------------------------------------------------------------------- */
+
+/* 2.4.7 Focus visible: a clear ring on every keyboard-focused element.
+   :focus-visible (not :focus) means the ring shows for keyboard users
+   but NOT for mouse clicks — best of both worlds. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* 2.4.1 Skip link: lets keyboard users jump to main content, bypassing nav. */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: var(--space-2);
+  background: var(--color-ink);
+  color: var(--color-text-on-ink);
+  padding: var(--space-2) var(--space-4);
+  text-decoration: none;
+  z-index: 1000;
+  border-radius: var(--radius-sm);
+  transition: top 0.2s;
+}
+.skip-link:focus {
+  top: var(--space-2);
+}
+
+/* Honor users' "prefer reduced motion" OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Links — green underline on hover, no underline at rest for cleaner look. */
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+/* Buttons should never carry the default browser styling. Atoms/Button.tsx
+   builds them properly. This baseline simply removes browser noise. */
+button {
+  font: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+/* Form inputs share base font — overridden per field by Atoms/Input.tsx. */
+input, textarea, select {
+  font: inherit;
+  color: inherit;
+}
+
+/* Container utility — capped width centered horizontally. */
+.container {
+  width: 100%;
+  max-width: var(--max-width-content);
+  margin: 0 auto;
+  padding: 0 var(--space-5);
+}
