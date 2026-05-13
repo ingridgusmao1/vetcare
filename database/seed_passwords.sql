@@ -1,3 +1,0 @@
-UPDATE users SET password_hash = '$argon2id$v=19$m=65536,t=3,p=4$mHHuGRd7HQ2uka0euSGwNA$F4uEWaWdOzQCCW0S3Z7ipTHZkS2SZqn7rIp4misdkBk' WHERE email = 'admin@vetcare.fr';
-UPDATE users SET password_hash = '$argon2id$v=19$m=65536,t=3,p=4$xOIb8dYBNqbEkVusHlfaZg$RdFUcygnY8BjEiKptZkEhWwphB3JKQZOup1u/RD700w' WHERE email = 'marie@vetcare.fr';
-UPDATE users SET password_hash = '$argon2id$v=19$m=65536,t=3,p=4$s9Vbi+Ug5fH3A0Ys1vXykQ$N5Hpp8127M1q/uenpz8WcYqHdA3eTdrwDBl8bhSky20' WHERE email = 'sofia@vetcare.fr';
